@@ -188,7 +188,7 @@ public final class CityCatalog {
             Sofia|Bulgaria|42.6977|23.3219|Europe/Sofia
             Bucharest|Romania|44.4268|26.1025|Europe/Bucharest
             Chișinău|Moldova|47.0105|28.8638|Europe/Chisinau
-            Kyiv|Ukraine|50.4501|30.5234|Europe/Kyiv
+            Kyiv|Ukraine|50.4501|30.5234|Europe/Kiev
             Minsk|Belarus|53.9006|27.5590|Europe/Minsk
             Vilnius|Lithuania|54.6872|25.2797|Europe/Vilnius
             Riga|Latvia|56.9496|24.1052|Europe/Riga
