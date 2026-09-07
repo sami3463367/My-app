@@ -24,6 +24,7 @@ import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.Window;
+import android.view.WindowInsets;
 import android.view.WindowManager;
 import android.view.animation.DecelerateInterpolator;
 import android.widget.BaseAdapter;
@@ -59,6 +60,10 @@ public final class MainActivity extends Activity {
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private GlobeSurfaceView globe;
+    private View headerView;
+    private View menuView;
+    private View weatherCardView;
+    private View orbitLegendView;
     private TextView cityName;
     private TextView cityCountry;
     private TextView localTime;
@@ -119,6 +124,11 @@ public final class MainActivity extends Activity {
         addWeatherCard(root);
         addOrbitLegend(root);
         addDrawer(root);
+        root.setOnApplyWindowInsetsListener((view, insets) -> {
+            applySystemBarInsets(insets);
+            return insets;
+        });
+        root.requestApplyInsets();
         return root;
     }
 
@@ -151,6 +161,7 @@ public final class MainActivity extends Activity {
         headerParams.leftMargin = dp(20);
         headerParams.topMargin = dp(34);
         root.addView(header, headerParams);
+        headerView = header;
 
         TextView menu = text("☰", 29, COLOR_TEXT, Typeface.NORMAL);
         menu.setGravity(Gravity.CENTER);
@@ -163,6 +174,7 @@ public final class MainActivity extends Activity {
         menuParams.rightMargin = dp(18);
         menuParams.topMargin = dp(29);
         root.addView(menu, menuParams);
+        menuView = menu;
     }
 
     private void addOrbitLegend(FrameLayout root) {
@@ -176,6 +188,7 @@ public final class MainActivity extends Activity {
                 Gravity.CENTER_HORIZONTAL | Gravity.BOTTOM);
         params.bottomMargin = dp(198);
         root.addView(legend, params);
+        orbitLegendView = legend;
     }
 
     private void addWeatherCard(FrameLayout root) {
@@ -254,6 +267,7 @@ public final class MainActivity extends Activity {
         cardParams.rightMargin = dp(16);
         cardParams.bottomMargin = dp(22);
         root.addView(card, cardParams);
+        weatherCardView = card;
     }
 
     private void addDrawer(FrameLayout root) {
@@ -337,6 +351,32 @@ public final class MainActivity extends Activity {
         FrameLayout.LayoutParams drawerParams = new FrameLayout.LayoutParams(drawerWidth,
                 ViewGroup.LayoutParams.MATCH_PARENT, Gravity.START | Gravity.TOP);
         root.addView(drawer, drawerParams);
+    }
+
+    /** Keeps the HUD clear of status/navigation bars, including Android 15/16 enforced edge-to-edge. */
+    private void applySystemBarInsets(WindowInsets insets) {
+        int top = Math.max(dp(29), insets.getSystemWindowInsetTop() + dp(9));
+        int bottom = Math.max(dp(18), insets.getSystemWindowInsetBottom() + dp(10));
+        if (headerView != null) {
+            FrameLayout.LayoutParams params = (FrameLayout.LayoutParams) headerView.getLayoutParams();
+            params.topMargin = top;
+            headerView.setLayoutParams(params);
+        }
+        if (menuView != null) {
+            FrameLayout.LayoutParams params = (FrameLayout.LayoutParams) menuView.getLayoutParams();
+            params.topMargin = Math.max(dp(25), insets.getSystemWindowInsetTop() + dp(5));
+            menuView.setLayoutParams(params);
+        }
+        if (weatherCardView != null) {
+            FrameLayout.LayoutParams params = (FrameLayout.LayoutParams) weatherCardView.getLayoutParams();
+            params.bottomMargin = bottom;
+            weatherCardView.setLayoutParams(params);
+        }
+        if (orbitLegendView != null) {
+            FrameLayout.LayoutParams params = (FrameLayout.LayoutParams) orbitLegendView.getLayoutParams();
+            params.bottomMargin = bottom + dp(176);
+            orbitLegendView.setLayoutParams(params);
+        }
     }
 
     private LinearLayout toolAction(String headline, String detail, View.OnClickListener listener) {
