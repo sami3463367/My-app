@@ -2,7 +2,7 @@ name: Android build
 
 on:
   push:
-    branches: ["arena/01a07d73-my-app"]
+    branches: ["arena/01a07d8e-my-app"]
   workflow_dispatch:
 
 permissions:
