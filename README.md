@@ -21,12 +21,12 @@ markers, orbit inertia, and pinch zoom are batched OpenGL ES 2.0 draw calls.
   temperature/feels-like/humidity/wind/precipitation, and a per-city live IANA time-zone clock.
 - **Planet tools menu:** city search, optional approximate device location, city-marker toggle,
   night-light toggle, cloud toggle, auto-orbit, units, reset, privacy text, and source credits.
-- **Publishing setup:** API 29 minimum / API 35 target, debug + release Gradle targets, optional
+- **Publishing setup:** API 29 minimum / API 36 target, debug + release Gradle targets, optional
   environment-driven signing, and a ready-to-enable GitHub Actions artifact-workflow template.
 
 ## Run it
 
-Open the repository root in Android Studio with JDK 17 and Android SDK Platform 35 installed, or:
+Open the repository root in Android Studio with JDK 17 and Android SDK Platform 36 installed, or:
 
 ```bash
 ./gradlew assembleDebug

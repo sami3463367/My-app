@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-- Android Studio Ladybug or newer (or Android SDK Platform 35 + Build Tools 35.0.0)
+- Android Studio Ladybug or newer (or Android SDK Platform 36 + Build Tools 36.0.0)
 - JDK 17
 - An Android 10 / API 29 or newer device for testing
 
