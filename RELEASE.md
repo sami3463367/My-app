@@ -52,10 +52,18 @@ private.
    only when the user presses **My location**; weather coordinates are sent to Open-Meteo only for
    a selected place.
 
-## Optional GitHub Actions build
+## GitHub Actions build
 
-`ci/android-build.yml.template` is a ready-to-run workflow that uploads the debug APK, unsigned
-release APK, and unsigned AAB as a 30-day artifact. To enable it in a repository where your GitHub
-connection has **Workflows: write** permission, copy it to `.github/workflows/android-build.yml`
-and push that change. It is kept as a template here because this sandbox's GitHub App token cannot
-create workflow files.
+`.github/workflows/android-build.yml` is enabled in this repository. It runs on pushes to the
+`arena/01a07d8e-my-app` branch or manually (Actions → **Android build** → Run workflow), using
+JDK 17, Android SDK Platform 36, and Build Tools 36.0.0:
+
+```bash
+./gradlew --no-daemon --stacktrace assembleDebug assembleRelease bundleRelease
+```
+
+Each successful run uploads the three outputs as the `nocturne-earth-weather-android` artifact
+(30-day retention). Download it from the run's **Artifacts** tab, or rebuild locally as above.
+
+Unless the `RELEASE_*` variables are set, the release APK and AAB are **unsigned** — sign the
+AAB with your own upload key (see above) before uploading it to Google Play.
