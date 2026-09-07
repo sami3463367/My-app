@@ -1,0 +1,64 @@
+plugins {
+    id 'com.android.application'
+}
+
+// A release key is intentionally not stored in this repository.  The optional
+// environment variables below make it straightforward to sign a Play upload build
+// in a secure local or CI environment.
+def releaseStoreFile = System.getenv("RELEASE_STORE_FILE")
+def hasReleaseSigning = releaseStoreFile != null &&
+        System.getenv("RELEASE_STORE_PASSWORD") != null &&
+        System.getenv("RELEASE_KEY_ALIAS") != null &&
+        System.getenv("RELEASE_KEY_PASSWORD") != null
+
+android {
+    namespace 'com.nocturne.earthweather'
+    compileSdk 36
+
+    defaultConfig {
+        applicationId 'com.nocturne.earthweather'
+        minSdk 29
+        targetSdk 36
+        versionCode 1
+        versionName '1.0.0'
+    }
+
+    signingConfigs {
+        if (hasReleaseSigning) {
+            release {
+                storeFile file(releaseStoreFile)
+                storePassword System.getenv("RELEASE_STORE_PASSWORD")
+                keyAlias System.getenv("RELEASE_KEY_ALIAS")
+                keyPassword System.getenv("RELEASE_KEY_PASSWORD")
+            }
+        }
+    }
+
+    buildTypes {
+        debug {
+            applicationIdSuffix '.debug'
+            versionNameSuffix '-debug'
+        }
+        release {
+            minifyEnabled false
+            shrinkResources false
+            if (hasReleaseSigning) {
+                signingConfig signingConfigs.release
+            }
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    buildFeatures {
+        buildConfig true
+    }
+
+    lint {
+        abortOnError false
+        checkReleaseBuilds false
+    }
+}
