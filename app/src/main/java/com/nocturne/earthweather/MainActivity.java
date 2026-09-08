@@ -84,7 +84,7 @@ public final class MainActivity extends Activity {
     private TextView uvValue;
     private TextView pressureValue;
     private LiveWeatherPanel livePanel;
-    private View liveResumeChip;
+    private TextView liveResumeChip;
     private boolean liveBroadcastEnabled = true;
     private View drawerScrim;
     private LinearLayout drawer;
