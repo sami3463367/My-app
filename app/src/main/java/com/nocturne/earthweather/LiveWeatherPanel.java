@@ -446,6 +446,3 @@ public final class LiveWeatherPanel extends FrameLayout {
         return Math.round(value * getResources().getDisplayMetrics().density);
     }
 }
-sources().getDisplayMetrics().density);
-    }
-}

@@ -1054,5 +1054,3 @@ public final class MainActivity extends Activity {
                 .toUpperCase(Locale.getDefault());
     }
 }
-
-}
