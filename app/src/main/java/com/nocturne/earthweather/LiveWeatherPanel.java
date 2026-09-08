@@ -275,12 +275,10 @@ public final class LiveWeatherPanel extends FrameLayout {
         settings.setTextZoom(100);
         view.setBackgroundColor(Color.BLACK);
         view.setWebViewClient(new WebViewClient() {
-            @Override
             public void onPageFinished(WebView view, String url) {
                 if (!standalone && !errorShowing) loadingView.setVisibility(View.GONE);
             }
 
-            @Override
             public void onReceivedError(WebView view, WebResourceRequest request) {
                 if (request == null || !request.isForMainFrame()) return;
                 Uri uri = request.getUrl();
@@ -294,7 +292,6 @@ public final class LiveWeatherPanel extends FrameLayout {
                 }
             }
 
-            @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 Uri uri = request.getUrl();
                 if (uri == null) return true;
@@ -438,7 +435,7 @@ public final class LiveWeatherPanel extends FrameLayout {
         GradientDrawable drawable = new GradientDrawable();
         drawable.setColor(color);
         drawable.setCornerRadius(radius);
-        if (strokeWidth > 0) drawable.setStroke(strowCount, strokeColor);
+        if (strokeWidth > 0) drawable.setStroke(strokeWidth, strokeColor);
         return drawable;
     }
 

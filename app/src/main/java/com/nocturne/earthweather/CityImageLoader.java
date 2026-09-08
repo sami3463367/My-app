@@ -5,7 +5,6 @@ import android.graphics.BitmapFactory;
 import android.net.Uri;
 import android.os.Handler;
 import android.os.Looper;
-import android.util.LruCache;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -18,6 +17,7 @@ import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.text.Normalizer;
 import java.util.Locale;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
@@ -38,12 +38,34 @@ public final class CityImageLoader {
     private static final Handler MAIN = new Handler(Looper.getMainLooper());
     private static final Map<String, Bitmap> MEMO = new ConcurrentHashMap<>();
     private static final Map<String, Boolean> IN_FLIGHT = new ConcurrentHashMap<>();
-    /** Small LRU for decoded bitmaps so re-selecting a city is instant. */
-    private static final LruCache<String, Bitmap> CACHE = new LruCache<String, Bitmap>(4 << 20) {
-        @Override protected int size(String key, Bitmap value) {
-            return value == null ? 0 : value.getByteCount();
+    /** Tiny self-contained LRU for decoded bitmaps so re-selecting a city is instant. */
+    private static final class BitmapLru {
+        private final LinkedHashMap<String, Bitmap> map =
+                new LinkedHashMap<String, Bitmap>(16, 0.75f, true) {
+            protected boolean removeEldestEntry(Map.Entry<String, Bitmap> eldest) {
+                return size() > 24 || byteSize() > 4 << 20;
+            }
+        };
+        private long bytes;
+
+        synchronized Bitmap get(String key) {
+            Bitmap bitmap = map.get(key);
+            if (bitmap == null) return null;
+            map.put(key, bitmap); // refresh recency
+            return bitmap;
         }
-    };
+
+        synchronized void put(String key, Bitmap value) {
+            Bitmap previous = map.put(key, value);
+            bytes += value.getByteCount() - (previous == null ? 0 : previous.getByteCount());
+        }
+
+        private synchronized long byteSize() {
+            return bytes;
+        }
+    }
+
+    private static final BitmapLru CACHE = new BitmapLru();
 
     private CityImageLoader() { }
 
