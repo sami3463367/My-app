@@ -115,11 +115,12 @@ public final class CityImageLoader {
             MEMO.put(key, result);
             CACHE.put(key, result);
         }
-        MAIN.post(() -> callback.onResult(key, result));
+        final Bitmap delivered = result;
+        MAIN.post(() -> callback.onResult(key, delivered));
     }
 
     /** Resolves the Wikipedia page title that best matches "city, country". */
-    private static String resolveTitle(City city) throws IOException {
+    private static String resolveTitle(City city) throws IOException, org.json.JSONException {
         String query = city.name + " " + city.country;
         String url = "https://en.wikipedia.org/w/api.php?action=opensearch&limit=6&redirects=resolve"
                 + "&format=json&search=" + Uri.encode(query);
@@ -148,7 +149,7 @@ public final class CityImageLoader {
      * Fetches the lead image of the article, requesting an ~800px render from the Commons
      * thumbnail service when the summary offers the default 320px thumbnail.
      */
-    private static String thumbnailUrl(String title) throws IOException {
+    private static String thumbnailUrl(String title) throws IOException, org.json.JSONException {
         String url = "https://en.wikipedia.org/api/rest_v1/page/summary/"
                 + Uri.encode(title.replace(' ', '_'));
         String body = httpGet(url);
