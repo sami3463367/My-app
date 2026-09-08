@@ -49,7 +49,22 @@ jobs:
           fi
 
       - name: Build debug APK, unsigned release APK, and unsigned App Bundle
-        run: ./gradlew --no-daemon --stacktrace assembleDebug assembleRelease bundleRelease
+        run: |
+          ./gradlew --no-daemon --stacktrace assembleDebug assembleRelease bundleRelease 2>&1 | tee /tmp/gradle-build.log
+          exit ${PIPESTATUS[0]}
+
+      - name: Publish build log for diagnosis
+        if: failure()
+        run: |
+          set -euo pipefail
+          mkdir -p ci-logs
+          cp /tmp/gradle-build.log ci-logs/gradle-build.log || true
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -B ci-artifacts
+          git add -f ci-logs
+          git commit -m "ci: publish gradle failure log"
+          git push -f origin ci-artifacts
 
       - name: Upload Android deliverables
         uses: actions/upload-artifact@v4
