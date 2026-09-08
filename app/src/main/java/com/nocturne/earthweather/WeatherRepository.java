@@ -155,7 +155,7 @@ public final class WeatherRepository {
         return -1;
     }
 
-    private static String optIso(JSONObject daily, String field) {
+    private static String optIso(JSONObject daily, String field) throws org.json.JSONException {
         JSONArray values = daily.optJSONArray(field);
         if (values == null || values.length() == 0 || values.isNull(0)) return null;
         String value = values.getString(0);
