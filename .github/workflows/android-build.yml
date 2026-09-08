@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
@@ -34,37 +34,8 @@ jobs:
       - name: Validate Gradle wrapper
         uses: gradle/actions/wrapper-validation@v4
 
-      - name: Fetch day map texture (one-time asset)
-        run: |
-          set -euo pipefail
-          if [ -f app/src/main/res/drawable-nodpi/earth_day.jpg ]; then
-            echo "Day map already present in checkout"
-          else
-            curl -fSL --retry 3 --retry-delay 5 --max-time 240 \
-              "https://upload.wikimedia.org/wikipedia/commons/c/c3/Solarsystemscope_texture_2k_earth_daymap.jpg" \
-              -o app/src/main/res/drawable-nodpi/earth_day.jpg
-            SIZE=$(stat -c%s app/src/main/res/drawable-nodpi/earth_day.jpg)
-            test "$SIZE" -gt 100000
-            echo "Day map downloaded: $SIZE bytes"
-          fi
-
       - name: Build debug APK, unsigned release APK, and unsigned App Bundle
-        run: |
-          ./gradlew --no-daemon --stacktrace assembleDebug assembleRelease bundleRelease 2>&1 | tee /tmp/gradle-build.log
-          exit ${PIPESTATUS[0]}
-
-      - name: Publish build log for diagnosis
-        if: failure()
-        run: |
-          set -euo pipefail
-          mkdir -p ci-logs
-          cp /tmp/gradle-build.log ci-logs/gradle-build.log || true
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git checkout -B ci-artifacts
-          git add -f ci-logs
-          git commit -m "ci: publish gradle failure log"
-          git push -f origin ci-artifacts
+        run: ./gradlew --no-daemon --stacktrace assembleDebug assembleRelease bundleRelease
 
       - name: Upload Android deliverables
         uses: actions/upload-artifact@v4
@@ -76,18 +47,3 @@ jobs:
             app/build/outputs/apk/release/app-release-unsigned.apk
             app/build/outputs/bundle/release/app-release.aab
           retention-days: 30
-
-      - name: Stage deliverables on a temporary branch (sandbox transport)
-        run: |
-          set -euo pipefail
-          mkdir -p deliverables assets
-          cp app/build/outputs/apk/debug/app-debug.apk deliverables/NocturneEarth-debug.apk
-          cp app/build/outputs/apk/release/app-release-unsigned.apk deliverables/NocturneEarth-release-unsigned.apk
-          cp app/build/outputs/bundle/release/app-release.aab deliverables/NocturneEarth-release-unsigned.aab
-          cp app/src/main/res/drawable-nodpi/earth_day.jpg assets/earth_day.jpg
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git checkout -B ci-artifacts
-          git add -f deliverables assets
-          git commit -m "ci: stage build deliverables (temporary transport branch)"
-          git push -f origin ci-artifacts
