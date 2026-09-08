@@ -30,8 +30,10 @@ import android.view.animation.DecelerateInterpolator;
 import android.widget.BaseAdapter;
 import android.widget.EditText;
 import android.widget.FrameLayout;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ListView;
+import android.widget.ScrollView;
 import android.widget.Switch;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -71,6 +73,19 @@ public final class MainActivity extends Activity {
     private TextView metricsLine;
     private TextView weatherStatus;
     private TextView unitsButton;
+    private ScrollView cardScroll;
+    private FrameLayout cityPhotoContainer;
+    private ImageView cityPhoto;
+    private TextView cityPhotoFallback;
+    private TextView windValue;
+    private TextView humidityValue;
+    private TextView rainValue;
+    private TextView sunValue;
+    private TextView uvValue;
+    private TextView pressureValue;
+    private LiveWeatherPanel livePanel;
+    private View liveResumeChip;
+    private boolean liveBroadcastEnabled = true;
     private View drawerScrim;
     private LinearLayout drawer;
     private TextView drawerUnitsAction;
@@ -192,7 +207,7 @@ public final class MainActivity extends Activity {
     }
 
     private void addWeatherCard(FrameLayout root) {
-        LinearLayout card = new LinearLayout(this);
+        final LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.VERTICAL);
         card.setPadding(dp(17), dp(15), dp(17), dp(14));
         card.setBackground(roundRect(Color.argb(239, 7, 16, 34), dp(23),
@@ -203,22 +218,48 @@ public final class MainActivity extends Activity {
         });
         card.setContentDescription("Selected city weather. Tap to refresh.");
 
+        // ── Header: city photograph, identity, unit toggle ─────────────────────
         LinearLayout top = new LinearLayout(this);
         top.setGravity(Gravity.CENTER_VERTICAL);
         top.setOrientation(LinearLayout.HORIZONTAL);
+
+        cityPhotoContainer = new FrameLayout(this);
+        cityPhotoContainer.setBackground(roundRect(COLOR_PANEL_STRONG, dp(14),
+                dp(1), Color.argb(130, 76, 205, 249)));
+        cityPhoto = new ImageView(this);
+        cityPhoto.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        cityPhoto.setClipToOutline(true);
+        cityPhoto.setContentDescription("Photograph of the selected city");
+        cityPhotoContainer.addView(cityPhoto, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        cityPhotoFallback = text("◍", 24, Color.argb(190, 75, 212, 255), Typeface.BOLD);
+        cityPhotoFallback.setGravity(Gravity.CENTER);
+        cityPhotoFallback.setContentDescription(null);
+        cityPhotoContainer.addView(cityPhotoFallback, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        top.addView(cityPhotoContainer, new LinearLayout.LayoutParams(dp(74), dp(74)));
+
         LinearLayout titles = new LinearLayout(this);
         titles.setOrientation(LinearLayout.VERTICAL);
         cityName = text("AWAITING A CITY", 16, COLOR_TEXT, Typeface.BOLD);
         cityName.setLetterSpacing(0.045f);
         cityCountry = text("TAP A LUMINOUS MARKER TO BEGIN", 10, COLOR_CYAN, Typeface.BOLD);
         cityCountry.setLetterSpacing(0.08f);
+        cityCountry.setSingleLine(true);
+        cityCountry.setEllipsize(android.text.TextUtils.TruncateAt.END);
         titles.addView(cityName);
         LinearLayout.LayoutParams countryParams = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         countryParams.topMargin = dp(3);
         titles.addView(cityCountry, countryParams);
-        top.addView(titles, new LinearLayout.LayoutParams(0,
-                ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        localTime = text("WORLD CLOCK READY", 10.5f, COLOR_MUTED, Typeface.NORMAL);
+        localTime.setLetterSpacing(0.04f);
+        localTime.setSingleLine(true);
+        localTime.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        LinearLayout.LayoutParams timeParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        timeParams.topMargin = dp(4);
+        titles.addView(localTime, timeParams);
 
         unitsButton = text("°C", 12, COLOR_CYAN, Typeface.BOLD);
         unitsButton.setGravity(Gravity.CENTER);
@@ -227,38 +268,82 @@ public final class MainActivity extends Activity {
                 dp(1), Color.argb(105, 84, 210, 255)));
         unitsButton.setContentDescription("Change temperature unit");
         unitsButton.setOnClickListener(view -> toggleTemperatureUnit());
-        top.addView(unitsButton, new LinearLayout.LayoutParams(dp(47), dp(30)));
+        LinearLayout.LayoutParams buttonParams = new LinearLayout.LayoutParams(dp(45), dp(30));
+        buttonParams.leftMargin = dp(10);
+        titles.addView(unitsButton, buttonParams);
+
+        LinearLayout.LayoutParams titlesParams = new LinearLayout.LayoutParams(0,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        titlesParams.leftMargin = dp(13);
+        top.addView(titles, titlesParams);
         card.addView(top);
 
-        localTime = text("WORLD CLOCK READY", 11, COLOR_MUTED, Typeface.NORMAL);
-        localTime.setLetterSpacing(0.04f);
-        LinearLayout.LayoutParams timeParams = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        timeParams.topMargin = dp(14);
-        card.addView(localTime, timeParams);
-
-        weatherLine = text("LIVE CONDITIONS WILL APPEAR HERE", 20, COLOR_TEXT, Typeface.BOLD);
+        weatherLine = text("LIVE CONDITIONS WILL APPEAR HERE", 19, COLOR_TEXT, Typeface.BOLD);
         weatherLine.setSingleLine(false);
         weatherLine.setLineSpacing(0f, 0.92f);
         LinearLayout.LayoutParams weatherParams = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        weatherParams.topMargin = dp(5);
+        weatherParams.topMargin = dp(13);
         card.addView(weatherLine, weatherParams);
 
-        metricsLine = text("EXPLORE THE NIGHT SIDE OF OUR PLANET", 11, COLOR_MUTED, Typeface.NORMAL);
+        // ── Metrics grid: wind · humidity · rain / sun · UV · pressure ─────────
+        card.addView(buildMetricsRow());
+        card.addView(buildMetricsRowSecond());
+
+        metricsLine = text("EXPLORE THE LIVE GLOBE AND TAP A CITY", 10.5f, COLOR_MUTED, Typeface.NORMAL);
         metricsLine.setSingleLine(false);
-        metricsLine.setLineSpacing(dp(3), 1f);
+        metricsLine.setLineSpacing(dp(2), 1f);
         LinearLayout.LayoutParams metricsParams = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        metricsParams.topMargin = dp(8);
+        metricsParams.topMargin = dp(7);
         card.addView(metricsLine, metricsParams);
+
+        // ── Live broadcast section ─────────────────────────────────────────────
+        livePanel = new LiveWeatherPanel(this);
+        livePanel.setVisibility(View.GONE);
+        livePanel.setOnClose(this::collapseLiveBroadcast);
+        LinearLayout.LayoutParams liveParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(150));
+        liveParams.topMargin = dp(12);
+        card.addView(livePanel, liveParams);
+
+        liveResumeChip = text("▶   START LIVE WEATHER BROADCAST", 10.5, COLOR_CYAN, Typeface.BOLD);
+        liveResumeChip.setLetterSpacing(0.08f);
+        liveResumeChip.setGravity(Gravity.CENTER);
+        liveResumeChip.setVisibility(View.GONE);
+        liveResumeChip.setContentDescription("Start the live weather broadcast");
+        liveResumeChip.setBackground(roundRect(Color.argb(175, 17, 49, 76), dp(16),
+                dp(1), Color.argb(105, 84, 210, 255)));
+        liveResumeChip.setOnClickListener(view -> expandLiveBroadcast());
+        LinearLayout.LayoutParams chipParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(40));
+        chipParams.topMargin = dp(12);
+        card.addView(liveResumeChip, chipParams);
 
         weatherStatus = text("OPEN-METEO LIVE DATA · TAP CARD TO REFRESH", 9, COLOR_CYAN, Typeface.BOLD);
         weatherStatus.setLetterSpacing(0.075f);
+        weatherStatus.setSingleLine(true);
+        weatherStatus.setEllipsize(android.text.TextUtils.TruncateAt.MARQUEE);
         LinearLayout.LayoutParams statusParams = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         statusParams.topMargin = dp(12);
         card.addView(weatherStatus, statusParams);
+
+        ScrollView scroll = new ScrollView(this) {
+            @Override protected void onMeasure(int widthSpec, int heightSpec) {
+                super.onMeasure(widthSpec, heightSpec);
+                int maxHeight = Math.round(getResources().getDisplayMetrics().heightPixels * 0.68f);
+                setMeasuredDimension(getMeasuredWidth(), Math.min(getMeasuredHeight(), maxHeight));
+            }
+        };
+        scroll.setFillViewport(true);
+        scroll.setOverScrollMode(View.OVER_SCROLL_NEVER);
+        scroll.setVerticalScrollBarVisibility(View.SCROLLBAR_NEVER);
+        scroll.setBackgroundColor(Color.TRANSPARENT);
+        card.setLayoutParams(new ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        scroll.addView(card);
+        cardScroll = scroll;
 
         FrameLayout.LayoutParams cardParams = new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
@@ -266,8 +351,57 @@ public final class MainActivity extends Activity {
         cardParams.leftMargin = dp(16);
         cardParams.rightMargin = dp(16);
         cardParams.bottomMargin = dp(22);
-        root.addView(card, cardParams);
+        root.addView(scroll, cardParams);
         weatherCardView = card;
+    }
+
+    private LinearLayout buildMetricsRow() {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        params.topMargin = dp(12);
+        row.setLayoutParams(params);
+        addMetricCell(row, "WIND", v -> windValue = v);
+        addMetricCell(row, "HUMIDITY", v -> humidityValue = v);
+        addMetricCell(row, "RAIN", v -> rainValue = v);
+        return row;
+    }
+
+    private LinearLayout buildMetricsRowSecond() {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        row.setLayoutParams(params);
+        addMetricCell(row, "SUNRISE · SUNSET", v -> sunValue = v);
+        addMetricCell(row, "UV INDEX", v -> uvValue = v);
+        addMetricCell(row, "PRESSURE", v -> pressureValue = v);
+        return row;
+    }
+
+    private void addMetricCell(LinearLayout row, String label, MetricSetter setter) {
+        LinearLayout cell = new LinearLayout(this);
+        cell.setOrientation(LinearLayout.VERTICAL);
+        TextView labelView = text(label, 8.5f, COLOR_MUTED, Typeface.BOLD);
+        labelView.setLetterSpacing(0.09f);
+        cell.addView(labelView);
+        TextView value = text("—", 12.5f, COLOR_TEXT, Typeface.BOLD);
+        value.setSingleLine(true);
+        value.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        LinearLayout.LayoutParams valueParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        valueParams.topMargin = dp(3);
+        cell.addView(value, valueParams);
+        setter.accept(value);
+        LinearLayout.LayoutParams cellParams = new LinearLayout.LayoutParams(0,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        if (row.getChildCount() > 0) cellParams.leftMargin = dp(10);
+        row.addView(cell, cellParams);
+    }
+
+    private interface MetricSetter {
+        void accept(TextView value);
     }
 
     private void addDrawer(FrameLayout root) {
@@ -322,6 +456,15 @@ public final class MainActivity extends Activity {
                 (button, enabled) -> globe.setNightLightsEnabled(enabled)));
         drawer.addView(toolSwitch("CLOUD VEIL", "Soft high-altitude cloud texture", true,
                 (button, enabled) -> globe.setCloudsEnabled(enabled)));
+        drawer.addView(toolSwitch("LIVE BROADCAST", "Auto-start a 24/7 live weather channel when a city opens",
+                liveBroadcastEnabled, (button, enabled) -> {
+                    liveBroadcastEnabled = enabled;
+                    if (enabled && activeCity != null && livePanel.getVisibility() != View.VISIBLE) {
+                        expandLiveBroadcast();
+                    } else if (!enabled) {
+                        collapseLiveBroadcast();
+                    }
+                }));
         drawer.addView(divider());
         LinearLayout unitsRow = toolAction("TEMPERATURE · °C", "Switch to Fahrenheit",
                 view -> toggleTemperatureUnit());
@@ -367,10 +510,10 @@ public final class MainActivity extends Activity {
             params.topMargin = Math.max(dp(25), insets.getSystemWindowInsetTop() + dp(5));
             menuView.setLayoutParams(params);
         }
-        if (weatherCardView != null) {
-            FrameLayout.LayoutParams params = (FrameLayout.LayoutParams) weatherCardView.getLayoutParams();
+        if (cardScroll != null) {
+            FrameLayout.LayoutParams params = (FrameLayout.LayoutParams) cardScroll.getLayoutParams();
             params.bottomMargin = bottom;
-            weatherCardView.setLayoutParams(params);
+            cardScroll.setLayoutParams(params);
         }
         if (orbitLegendView != null) {
             FrameLayout.LayoutParams params = (FrameLayout.LayoutParams) orbitLegendView.getLayoutParams();
@@ -457,7 +600,53 @@ public final class MainActivity extends Activity {
         weatherStatus.setText("●  FETCHING OPEN-METEO LIVE DATA");
         updateClock();
         if (fromTool) closeDrawer();
+        orbitLegendView.setVisibility(View.GONE);
         requestWeather(city, false);
+        updateCityPhoto(city);
+        if (liveBroadcastEnabled) {
+            expandLiveBroadcast();
+        } else {
+            livePanel.setVisibility(View.GONE);
+            liveResumeChip.setVisibility(View.VISIBLE);
+        }
+    }
+
+    private void expandLiveBroadcast() {
+        if (activeCity == null) return;
+        liveResumeChip.setVisibility(View.GONE);
+        livePanel.setVisibility(View.VISIBLE);
+        startLiveBroadcast();
+    }
+
+    private void collapseLiveBroadcast() {
+        livePanel.setVisibility(View.GONE);
+        if (activeCity != null) liveResumeChip.setVisibility(View.VISIBLE);
+    }
+
+    private void startLiveBroadcast() {
+        if (activeCity == null) return;
+        LiveWeatherCatalog.Entry entry = LiveWeatherCatalog.entryFor(activeCity.country);
+        if (entry != null) {
+            livePanel.load(entry.liveUrl, entry.channelLabel);
+        } else {
+            livePanel.load(LiveWeatherCatalog.liveSearchUrl(activeCity.country),
+                    LiveWeatherCatalog.searchLabelFor(activeCity.country));
+        }
+    }
+
+    private void updateCityPhoto(City city) {
+        String key = city.key();
+        cityPhoto.setImageBitmap(null);
+        cityPhotoFallback.setText(String.valueOf(city.name == null || city.name.isEmpty()
+                ? '◍' : city.name.charAt(0)).toUpperCase(Locale.getDefault()));
+        cityPhotoFallback.setVisibility(View.VISIBLE);
+        CityImageLoader.load(city, (cityKey, bitmap) -> {
+            if (!key.equals(cityKey)) return; // a newer city was selected in the meantime
+            if (bitmap != null) {
+                cityPhoto.setImageBitmap(bitmap);
+                cityPhotoFallback.setVisibility(View.GONE);
+            }
+        });
     }
 
     private void requestWeather(City city, boolean forceRefresh) {
@@ -489,12 +678,53 @@ public final class MainActivity extends Activity {
     private void renderWeather(WeatherSnapshot snapshot, boolean fromCache) {
         weatherLine.setText(snapshot.condition().toUpperCase(Locale.getDefault()) + "   "
                 + snapshot.temperature(fahrenheit));
-        String rain = snapshot.precipitationMm > 0d
-                ? String.format(Locale.getDefault(), "  ·  RAIN %.1f mm", snapshot.precipitationMm)
+
+        windValue.setText(snapshot.hasWind()
+                ? String.format(Locale.getDefault(), "%.0f km/h %s %s",
+                        snapshot.windKph, snapshot.windDirectionLabel(), snapshot.windArrow())
+                : "—");
+        humidityValue.setText(snapshot.hasHumidity()
+                ? String.format(Locale.getDefault(), "%d%%", Math.round(snapshot.humidityPercent))
+                : "—");
+        if (snapshot.precipitationMm > 0.04d) {
+            rainValue.setText(String.format(Locale.getDefault(), "%.1f mm%s",
+                    snapshot.precipitationMm,
+                    snapshot.hasRainChance()
+                            ? "  ·  " + Math.round(snapshot.rainChancePercent) + "% chance" : ""));
+        } else if (snapshot.hasRainChance() && snapshot.rainChancePercent >= 1d) {
+            rainValue.setText(String.format(Locale.getDefault(), "%d%% chance",
+                    Math.round(snapshot.rainChancePercent)));
+        } else {
+            rainValue.setText("Dry");
+        }
+        sunValue.setText(snapshot.hasSun()
+                ? WeatherSnapshot.clockPart(snapshot.sunriseIso) + "  ·  "
+                        + WeatherSnapshot.clockPart(snapshot.sunsetIso)
+                : "—");
+        if (snapshot.hasUv()) {
+            uvValue.setText(String.format(Locale.getDefault(), "%.0f · %s",
+                    snapshot.uvIndex, snapshot.uvLabel()));
+            int[] uvColors = {
+                    Color.rgb(116, 230, 146),
+                    Color.rgb(255, 200, 87),
+                    Color.rgb(255, 152, 70),
+                    Color.rgb(255, 99, 99),
+                    Color.rgb(206, 126, 255),
+            };
+            uvValue.setTextColor(uvColors[Math.max(0, Math.min(4, snapshot.uvRating()))]);
+        } else {
+            uvValue.setText("—");
+            uvValue.setTextColor(COLOR_TEXT);
+        }
+        pressureValue.setText(snapshot.hasPressure()
+                ? String.format(Locale.getDefault(), "%.0f hPa", snapshot.pressureHpa)
+                : "—");
+
+        String gusts = snapshot.hasWind() && !Double.isNaN(snapshot.windGustsKph)
+                && snapshot.windGustsKph > snapshot.windKph
+                ? String.format(Locale.getDefault(), "  ·  GUSTS %.0f km/h", snapshot.windGustsKph)
                 : "";
-        metricsLine.setText("FEELS " + snapshot.apparentTemperature(fahrenheit)
-                + "  ·  HUMIDITY " + Math.round(snapshot.humidityPercent) + "%"
-                + "  ·  WIND " + Math.round(snapshot.windKph) + " km/h" + rain);
+        metricsLine.setText("FEELS " + snapshot.apparentTemperature(fahrenheit) + gusts);
         try {
             ZoneId zone = ZoneId.of(snapshot.providerZoneId);
             String updated = ZonedDateTime.now(zone).format(UPDATED_FORMAT);
@@ -754,21 +984,33 @@ public final class MainActivity extends Activity {
         new AlertDialog.Builder(this)
                 .setTitle("Nocturne Earth")
                 .setMessage("A native OpenGL ES globe for Android 10 and newer.\n\n"
-                        + "Controls: drag to orbit, pinch to zoom, tap a cyan city signal, or double-tap to reset.\n\n"
-                        + "Live current conditions: Open-Meteo (no personal API key required). "
-                        + "Weather requests are made only after you choose a place.\n\n"
-                        + "Texture attribution: Solar System Scope Earth night and cloud textures, "
+                        + "Controls: drag to orbit, pinch to zoom, tap a city signal, or double-tap to reset. "
+                        + "The day/night terminator follows the real position of the sun at your current UTC time.\n\n"
+                        + "Live conditions: Open-Meteo (no personal API key required). Weather requests "
+                        + "are made only after you choose a place.\n\n"
+                        + "City photographs: Wikipedia (CC BY-SA and other licenses, via the Wikipedia REST API).\n\n"
+                        + "Live broadcasts: 24/7 channels on YouTube (WeatherNation, Sky News, France 24, "
+                        + "DW News and others) or live YouTube search results, streamed only when you start them.\n\n"
+                        + "Texture attribution: Solar System Scope Earth day, night and cloud textures, "
                         + "CC BY 4.0, based on NASA imagery. See ASSET_ATTRIBUTION.md in the source project.")
                 .setPositiveButton("DONE", null)
                 .show();
     }
 
     @Override public void onBackPressed() {
-        if (drawerOpen) {
+        if (livePanel != null && livePanel.isFullscreenOpen()) {
+            livePanel.closeFullscreen();
+        } else if (drawerOpen) {
             closeDrawer();
         } else {
             super.onBackPressed();
         }
+    }
+
+    @Override protected void onDestroy() {
+        if (livePanel != null) livePanel.destroy();
+        stopLocationUpdates();
+        super.onDestroy();
     }
 
     @Override protected void onResume() {

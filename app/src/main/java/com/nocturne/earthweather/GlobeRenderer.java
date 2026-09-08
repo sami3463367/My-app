@@ -46,7 +46,10 @@ public final class GlobeRenderer implements android.opengl.GLSurfaceView.Rendere
     private int cityProgram;
     private int starProgram;
     private int earthTexture;
+    private int dayTexture;
     private int cloudTexture;
+    private final float[] sunLocal = new float[3];
+    private final float[] sunWorld = new float[3];
 
     private final float[] model = new float[16];
     private final float[] view = new float[16];
@@ -58,10 +61,13 @@ public final class GlobeRenderer implements android.opengl.GLSurfaceView.Rendere
     private volatile float aspect = 1f;
     private long previousFrameNanos;
 
-    // All angles are radians. Initial framing presents Europe and Africa, then slowly drifts.
+    // All angles are radians. Initial framing presents the whole disc with comfortable
+    // breathing room (deliberately 50% further back than a tight crop), then slowly drifts.
     private float yaw = PI / 2f;
     private float pitch = -0.12f;
-    private float distance = 3.16f;
+    private float distance = 6.32f;
+    private static final float MIN_DISTANCE = 1.34f;
+    private static final float MAX_DISTANCE = 6.36f;
     private float yawVelocity;
     private float pitchVelocity;
     private float targetYaw = Float.NaN;
@@ -99,6 +105,8 @@ public final class GlobeRenderer implements android.opengl.GLSurfaceView.Rendere
         int[] maxTextureSize = new int[1];
         GLES20.glGetIntegerv(GLES20.GL_MAX_TEXTURE_SIZE, maxTextureSize, 0);
         earthTexture = loadTexture(R.drawable.earth_night, maxTextureSize[0] >= 4096 ? 1 : 2,
+                Bitmap.Config.ARGB_8888);
+        dayTexture = loadTexture(R.drawable.earth_day, maxTextureSize[0] >= 2048 ? 1 : 2,
                 Bitmap.Config.ARGB_8888);
         cloudTexture = loadTexture(R.drawable.earth_clouds, maxTextureSize[0] >= 2048 ? 1 : 2,
                 Bitmap.Config.RGB_565);
@@ -162,7 +170,7 @@ public final class GlobeRenderer implements android.opengl.GLSurfaceView.Rendere
                     }
                 }
                 pitch = clamp(pitch, -1.32f, 1.32f);
-                distance = clamp(distance, 1.34f, 6.2f);
+                distance = clamp(distance, MIN_DISTANCE, MAX_DISTANCE);
             }
             return new Transform(yaw, pitch, distance,
                     cloudsEnabled, nightLightsEnabled, selectedKey);
@@ -181,6 +189,42 @@ public final class GlobeRenderer implements android.opengl.GLSurfaceView.Rendere
         Matrix.multiplyMM(modelView, 0, view, 0, model, 0);
         Matrix.multiplyMM(mvp, 0, projection, 0, modelView, 0);
         Matrix.multiplyMM(viewProjection, 0, projection, 0, view, 0);
+    }
+
+    /**
+     * Computes the sun direction for the current UTC instant and transforms it into world space
+     * (the sphere's rotated frame) so the shader can shade the true day/night terminator.
+     * Low-precision solar ephemeris: accurate to well under a degree, which is far beyond what
+     * the visual terminator needs.
+     */
+    private void computeSunDirection() {
+        double daysSinceJ2000 = (System.currentTimeMillis() - 946_728_000_000L) / 86_400_000.0;
+        double meanLongitude = Math.toRadians(280.460 + 0.9856474 * daysSinceJ2000);
+        double meanAnomaly = Math.toRadians(357.528 + 0.9856003 * daysSinceJ2000);
+        double eclipticLongitude = meanLongitude
+                + Math.toRadians(1.915) * Math.sin(meanAnomaly)
+                + Math.toRadians(0.020) * Math.sin(2.0 * meanAnomaly);
+        double obliquity = Math.toRadians(23.439);
+        double declination = Math.asin(Math.sin(eclipticLongitude) * Math.sin(obliquity));
+        double rightAscension = Math.atan2(
+                Math.sin(eclipticLongitude) * Math.cos(obliquity), Math.cos(eclipticLongitude));
+        double gmst = Math.toRadians(280.46061837 + 360.98564736629 * daysSinceJ2000);
+        double subsolarLongitude = normalizeAngle(rightAscension - gmst);
+
+        // Same basis as cityPoint()/the equirectangular texture: longitude offset by PI.
+        double cosDeclination = Math.cos(declination);
+        double theta = subsolarLongitude + PI;
+        sunLocal[0] = (float) (cosDeclination * Math.cos(theta));
+        sunLocal[1] = (float) Math.sin(declination);
+        sunLocal[2] = (float) (cosDeclination * Math.sin(theta));
+        Matrix.multiplyMV(sunWorld, 0, model, 0, sunLocal, 0);
+    }
+
+    private static double normalizeAngle(double radians) {
+        double angle = radians % (2.0 * Math.PI);
+        if (angle > Math.PI) angle -= 2.0 * Math.PI;
+        if (angle < -Math.PI) angle += 2.0 * Math.PI;
+        return angle;
     }
 
     private void drawStars(float elapsed) {
@@ -225,12 +269,18 @@ public final class GlobeRenderer implements android.opengl.GLSurfaceView.Rendere
         GLES20.glUniform1f(GLES20.glGetUniformLocation(earthProgram, "uLightStrength"),
                 transform.nightLights ? 1f : 0.08f);
 
+        computeSunDirection();
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, earthTexture);
         GLES20.glUniform1i(GLES20.glGetUniformLocation(earthProgram, "uNightMap"), 0);
         GLES20.glActiveTexture(GLES20.GL_TEXTURE1);
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, cloudTexture);
         GLES20.glUniform1i(GLES20.glGetUniformLocation(earthProgram, "uCloudMap"), 1);
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE2);
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, dayTexture);
+        GLES20.glUniform1i(GLES20.glGetUniformLocation(earthProgram, "uDayMap"), 2);
+        GLES20.glUniform3f(GLES20.glGetUniformLocation(earthProgram, "uSunDir"),
+                sunWorld[0], sunWorld[1], sunWorld[2]);
 
         sphereVertices.position(0);
         GLES20.glVertexAttribPointer(position, 3, GLES20.GL_FLOAT, false, STRIDE_BYTES, sphereVertices);
@@ -262,6 +312,8 @@ public final class GlobeRenderer implements android.opengl.GLSurfaceView.Rendere
                 1, false, model, 0);
         GLES20.glUniform3f(GLES20.glGetUniformLocation(atmosphereProgram, "uCamera"),
                 0f, 0f, transform.distance);
+        GLES20.glUniform3f(GLES20.glGetUniformLocation(atmosphereProgram, "uSunDir"),
+                sunWorld[0], sunWorld[1], sunWorld[2]);
         sphereVertices.position(0);
         GLES20.glVertexAttribPointer(position, 3, GLES20.GL_FLOAT, false, STRIDE_BYTES, sphereVertices);
         GLES20.glEnableVertexAttribArray(position);
@@ -286,7 +338,7 @@ public final class GlobeRenderer implements android.opengl.GLSurfaceView.Rendere
                 1, false, mvp, 0);
         GLES20.glUniform1f(GLES20.glGetUniformLocation(cityProgram, "uDensity"), density);
         GLES20.glUniform1f(GLES20.glGetUniformLocation(cityProgram, "uZoom"),
-                clamp(4.6f - transform.distance, 0f, 3f));
+                clamp((MAX_DISTANCE - transform.distance) / 1.6f, 0f, 3f));
         GLES20.glUniform1f(GLES20.glGetUniformLocation(cityProgram, "uTime"), elapsed);
 
         cityVertices.position(0);
@@ -371,7 +423,7 @@ public final class GlobeRenderer implements android.opengl.GLSurfaceView.Rendere
             if (isSelected) {
                 cityVertices.put(1.00f).put(0.63f).put(0.22f).put(1f);
             } else {
-                cityVertices.put(0.18f).put(0.81f).put(1.00f).put(0f);
+                cityVertices.put(0.40f).put(0.88f).put(1.00f).put(0f);
             }
         }
         cityVertices.position(0);
@@ -463,7 +515,7 @@ public final class GlobeRenderer implements android.opengl.GLSurfaceView.Rendere
     public void zoomBy(float scaleFactor) {
         synchronized (stateLock) {
             if (scaleFactor > 0f) {
-                distance = clamp(distance / scaleFactor, 1.34f, 6.2f);
+                distance = clamp(distance / scaleFactor, MIN_DISTANCE, MAX_DISTANCE);
                 targetDistance = Float.NaN;
                 lastInteractionMillis = SystemClock.elapsedRealtime();
             }
@@ -505,7 +557,7 @@ public final class GlobeRenderer implements android.opengl.GLSurfaceView.Rendere
         synchronized (stateLock) {
             targetYaw = PI / 2f;
             targetPitch = -0.12f;
-            targetDistance = 3.16f;
+            targetDistance = 6.32f;
             selectedKey = null;
             cityBufferDirty = true;
             yawVelocity = 0f;
@@ -646,6 +698,8 @@ public final class GlobeRenderer implements android.opengl.GLSurfaceView.Rendere
             precision mediump float;
             uniform sampler2D uNightMap;
             uniform sampler2D uCloudMap;
+            uniform sampler2D uDayMap;
+            uniform vec3 uSunDir;
             uniform vec3 uCamera;
             uniform float uTime;
             uniform float uClouds;
@@ -654,21 +708,46 @@ public final class GlobeRenderer implements android.opengl.GLSurfaceView.Rendere
             varying vec3 vWorldPosition;
             varying vec3 vNormal;
             void main() {
-                vec3 night = texture2D(uNightMap, vec2(fract(vUv.x), vUv.y)).rgb;
-                float luminance = dot(night, vec3(0.2126, 0.7152, 0.0722));
-                vec3 ocean = vec3(0.0015, 0.007, 0.026);
-                vec3 terrain = night * vec3(0.15, 0.22, 0.42);
-                vec3 color = ocean + terrain;
+                vec2 uv = vec2(fract(vUv.x), vUv.y);
+                vec3 nightTex = texture2D(uNightMap, uv).rgb;
+                vec3 dayTex = texture2D(uDayMap, uv).rgb;
+
+                // Night side: deep space-dark ocean plus satellite city lights.
+                float luminance = dot(nightTex, vec3(0.2126, 0.7152, 0.0722));
+                vec3 nightColor = vec3(0.0015, 0.007, 0.026)
+                        + nightTex * vec3(0.15, 0.22, 0.42);
                 float cityLights = smoothstep(0.022, 0.66, luminance);
-                color += night * vec3(0.32, 0.58, 1.16)
-                        * (0.26 + 1.42 * pow(cityLights, 1.35)) * uLightStrength;
+                float lightBoost = (0.26 + 1.42 * pow(cityLights, 1.35)) * uLightStrength;
+
+                // Day side: real satellite colour with a light cinematic grade.
+                vec3 dayColor = dayTex * vec3(1.045, 1.03, 1.0) + vec3(0.012, 0.016, 0.03);
+                float oceanMask = 1.0 - smoothstep(0.05, 0.42, luminance);
+                dayColor += vec3(0.018, 0.05, 0.085) * oceanMask;
+
+                float sunDot = dot(normalize(vNormal), normalize(uSunDir));
+                float dayFactor = smoothstep(-0.10, 0.18, sunDot);
+                float terminator = smoothstep(-0.24, -0.04, sunDot)
+                        * (1.0 - smoothstep(-0.04, 0.16, sunDot));
+
+                vec3 color = mix(nightColor, dayColor, dayFactor);
+                // City lights fade out over the daylit side.
+                color += nightTex * vec3(0.32, 0.58, 1.16) * lightBoost
+                        * (1.0 - dayFactor * 0.96);
+                // Warm sunset/sunrise band straddling the terminator.
+                color += vec3(0.85, 0.42, 0.18) * terminator * 0.16;
+
+                // Clouds: bright white in daylight, faintly lit on the night side.
                 float cloudSample = texture2D(uCloudMap,
                         vec2(fract(vUv.x + uTime * 0.00085), vUv.y)).r;
                 float cloud = smoothstep(0.38, 0.86, cloudSample);
-                color += vec3(0.045, 0.12, 0.25) * cloud * uClouds * 0.46;
+                vec3 cloudTint = mix(vec3(0.045, 0.12, 0.25), vec3(1.0, 0.99, 0.97), dayFactor);
+                color = mix(color, cloudTint, cloud * uClouds * 0.82);
+                color += vec3(0.85, 0.42, 0.18) * terminator * cloud * uClouds * 0.10;
+
                 vec3 viewDirection = normalize(uCamera - vWorldPosition);
                 float fresnel = pow(1.0 - max(dot(normalize(vNormal), viewDirection), 0.0), 3.1);
-                color += vec3(0.008, 0.075, 0.26) * fresnel * 0.72;
+                vec3 rim = mix(vec3(0.008, 0.075, 0.26), vec3(0.25, 0.55, 1.0), dayFactor);
+                color += rim * fresnel * 0.72;
                 gl_FragColor = vec4(color, 1.0);
             }
             """;
@@ -691,13 +770,16 @@ public final class GlobeRenderer implements android.opengl.GLSurfaceView.Rendere
     private static final String ATMOSPHERE_FRAGMENT_SHADER = """
             precision mediump float;
             uniform vec3 uCamera;
+            uniform vec3 uSunDir;
             varying vec3 vWorldPosition;
             varying vec3 vNormal;
             void main() {
                 vec3 viewDirection = normalize(uCamera - vWorldPosition);
                 float rim = pow(1.0 - max(dot(normalize(vNormal), viewDirection), 0.0), 2.5);
-                float alpha = rim * 0.54;
-                gl_FragColor = vec4(vec3(0.025, 0.29, 0.92) * rim, alpha);
+                // The limb glows a little more on the sunlit side.
+                float dayBoost = 0.72 + 0.55 * max(dot(normalize(vNormal), uSunDir), 0.0);
+                float alpha = rim * 0.54 * dayBoost;
+                gl_FragColor = vec4(vec3(0.025, 0.29, 0.92) * rim * dayBoost, alpha);
             }
             """;
 
@@ -714,7 +796,7 @@ public final class GlobeRenderer implements android.opengl.GLSurfaceView.Rendere
                 vColor = aColor;
                 vSelected = aSelected;
                 gl_Position = uMvp * vec4(aPosition, 1.0);
-                gl_PointSize = uDensity * (2.45 + uZoom * 0.55 + aSelected * 4.8);
+                gl_PointSize = uDensity * (2.75 + uZoom * 0.85 + aSelected * 5.2);
             }
             """;
 
@@ -727,11 +809,15 @@ public final class GlobeRenderer implements android.opengl.GLSurfaceView.Rendere
                 vec2 point = gl_PointCoord * 2.0 - 1.0;
                 float radius = length(point);
                 if (radius > 1.0) discard;
-                float core = 1.0 - smoothstep(0.02, 0.33, radius);
-                float halo = pow(max(1.0 - radius, 0.0), 2.15);
+                // Crisp white-hot core, a clean ring, and a soft outer glow.
+                float core = 1.0 - smoothstep(0.0, 0.30, radius);
+                float ring = (1.0 - smoothstep(0.58, 0.72, radius))
+                        * (1.0 - smoothstep(0.72, 0.86, radius));
+                float halo = pow(max(1.0 - radius, 0.0), 2.7);
                 float pulse = 0.92 + vSelected * (0.24 + 0.18 * sin(uTime * 4.0));
-                float alpha = (halo * 0.54 + core * 0.72) * pulse;
-                gl_FragColor = vec4(vColor * (core * 1.28 + halo * 0.55) * pulse, alpha);
+                vec3 tint = mix(vec3(0.86, 0.97, 1.0), vColor, 0.75);
+                float alpha = (core * 0.95 + ring * 0.72 + halo * 0.40) * pulse;
+                gl_FragColor = vec4(tint * (core * 1.65 + ring * 0.95 + halo * 0.50) * pulse, alpha);
             }
             """;
 

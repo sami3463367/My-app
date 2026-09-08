@@ -2,6 +2,7 @@ package com.nocturne.earthweather;
 
 import android.net.Uri;
 
+import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.BufferedReader;
@@ -51,7 +52,11 @@ public final class WeatherRepository {
                         .appendQueryParameter("longitude", String.format(Locale.US, "%.5f", city.longitude))
                         .appendQueryParameter("current",
                                 "temperature_2m,relative_humidity_2m,apparent_temperature,"
-                                        + "precipitation,weather_code,is_day,wind_speed_10m")
+                                        + "precipitation,weather_code,is_day,wind_speed_10m,"
+                                        + "wind_direction_10m,wind_gusts_10m,surface_pressure")
+                        .appendQueryParameter("hourly", "uv_index,precipitation_probability")
+                        .appendQueryParameter("daily", "sunrise,sunset")
+                        .appendQueryParameter("forecast_days", "1")
                         .appendQueryParameter("timezone", "auto")
                         .build().toString();
                 connection = (HttpURLConnection) new URL(url).openConnection();
@@ -60,7 +65,7 @@ public final class WeatherRepository {
                 connection.setReadTimeout(12_000);
                 connection.setUseCaches(false);
                 connection.setRequestProperty("Accept", "application/json");
-                connection.setRequestProperty("User-Agent", "NocturneEarth/1.0 (Android)");
+                connection.setRequestProperty("User-Agent", "NocturneEarth/1.1 (Android)");
 
                 int responseCode = connection.getResponseCode();
                 if (responseCode < 200 || responseCode >= 300) {
@@ -70,14 +75,49 @@ public final class WeatherRepository {
                 JSONObject response = new JSONObject(body);
                 JSONObject current = response.getJSONObject("current");
                 String zone = response.optString("timezone", city.zoneId);
+                String currentTime = current.optString("time", "");
+
+                double uvIndex = Double.NaN;
+                double rainChance = Double.NaN;
+                JSONObject hourly = response.optJSONObject("hourly");
+                if (hourly != null) {
+                    int hourIndex = currentHourIndex(hourly.optJSONArray("time"), currentTime);
+                    if (hourIndex >= 0) {
+                        JSONArray uv = hourly.optJSONArray("uv_index");
+                        if (uv != null && hourIndex < uv.length()) {
+                            uvIndex = uv.isNull(hourIndex) ? Double.NaN : uv.getDouble(hourIndex);
+                        }
+                        JSONArray chance = hourly.optJSONArray("precipitation_probability");
+                        if (chance != null && hourIndex < chance.length()) {
+                            rainChance = chance.isNull(hourIndex)
+                                    ? Double.NaN : chance.getDouble(hourIndex);
+                        }
+                    }
+                }
+
+                String sunrise = null;
+                String sunset = null;
+                JSONObject daily = response.optJSONObject("daily");
+                if (daily != null && daily.length() > 0) {
+                    sunrise = optIso(daily, "sunrise");
+                    sunset = optIso(daily, "sunset");
+                }
+
                 WeatherSnapshot snapshot = new WeatherSnapshot(
                         current.optDouble("temperature_2m", Double.NaN),
                         current.optDouble("apparent_temperature", Double.NaN),
                         current.optDouble("relative_humidity_2m", Double.NaN),
                         current.optDouble("wind_speed_10m", Double.NaN),
+                        current.optDouble("wind_direction_10m", Double.NaN),
+                        current.optDouble("wind_gusts_10m", Double.NaN),
+                        current.optDouble("surface_pressure", Double.NaN),
                         current.optDouble("precipitation", 0d),
+                        rainChance,
+                        uvIndex,
                         current.optInt("weather_code", -1),
                         current.optInt("is_day", 0) == 1,
+                        sunrise,
+                        sunset,
                         zone,
                         System.currentTimeMillis());
                 CACHE.put(city.key(), snapshot);
@@ -88,6 +128,38 @@ public final class WeatherRepository {
                 if (connection != null) connection.disconnect();
             }
         });
+    }
+
+    /** Index of the current local hour inside the hourly array, matched by wall-clock prefix. */
+    private static int currentHourIndex(JSONArray times, String currentTime) {
+        if (times == null || currentTime == null || currentTime.length() < 13) return -1;
+        // "2026-09-08T21:30" -> "2026-09-08T21"
+        String hourPrefix = currentTime.substring(0, 13);
+        int exact = indexOf(times, hourPrefix);
+        if (exact >= 0) return exact;
+        // Fall back to the nearest earlier hour in case the provider truncates differently.
+        for (int i = times.length() - 1; i >= 0; i--) {
+            String t = times.optString(i, "");
+            if (t.length() >= 13 && t.substring(0, 13).compareTo(hourPrefix) <= 0) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    private static int indexOf(JSONArray array, String prefix) {
+        for (int i = 0; i < array.length(); i++) {
+            String t = array.optString(i, "");
+            if (t.length() >= 13 && t.substring(0, 13).equals(prefix)) return i;
+        }
+        return -1;
+    }
+
+    private static String optIso(JSONObject daily, String field) {
+        JSONArray values = daily.optJSONArray(field);
+        if (values == null || values.length() == 0 || values.isNull(0)) return null;
+        String value = values.getString(0);
+        return value == null || value.isEmpty() ? null : value;
     }
 
     private static String readAll(InputStream stream) throws IOException {
