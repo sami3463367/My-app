@@ -39,13 +39,14 @@ public final class LiveWeatherPanel extends FrameLayout {
     private final FrameLayout content;
     private final View loadingView;
     private final View errorView;
-    private final TextView channelLabel;
-    private final TextView statusHint;
+    private TextView channelLabel;
+    private TextView statusHint;
     private WebView webView;
     private Dialog fullscreenDialog;
     private Runnable onClose;
     private boolean errorShowing;
     private long lastTapMillis;
+    private String currentUrl = "";
 
     public LiveWeatherPanel(Context context) {
         super(context);
@@ -54,7 +55,7 @@ public final class LiveWeatherPanel extends FrameLayout {
         setClipToOutline(true);
         setBackground(roundRect(Color.BLACK, dp(16), dp(1), Color.argb(120, 76, 205, 249)));
         setClickable(true);
-        setOnClickListener(this::onPlayerTap);
+        setOnClickListener(view -> onPlayerTap());
 
         content = new FrameLayout(activity);
         addView(content, new LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
@@ -109,7 +110,7 @@ public final class LiveWeatherPanel extends FrameLayout {
                     if (onClose != null) onClose.run();
                 }));
 
-        LinearLayout.LayoutParams chromeParams = new LayoutParams(
+        FrameLayout.LayoutParams chromeParams = new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
                 Gravity.TOP);
         addView(chrome, chromeParams);
@@ -122,7 +123,7 @@ public final class LiveWeatherPanel extends FrameLayout {
         statusHint.setLetterSpacing(0.10f);
         statusHint.setGravity(Gravity.CENTER_HORIZONTAL);
         statusHint.setVisibility(View.GONE);
-        LinearLayout.LayoutParams hintParams = new LayoutParams(
+        FrameLayout.LayoutParams hintParams = new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
                 Gravity.BOTTOM);
         addView(statusHint, hintParams);
@@ -222,14 +223,14 @@ public final class LiveWeatherPanel extends FrameLayout {
         actions.setOrientation(LinearLayout.HORIZONTAL);
         actions.setGravity(Gravity.CENTER);
         TextView retry = chromeButtonSmall("RETRY", "Retry the broadcast",
-                view -> {
+                v -> {
                     errorShowing = false;
                     errorView.setVisibility(View.GONE);
                     if (webView != null) webView.reload();
                     loadingView.setVisibility(View.VISIBLE);
                 });
         TextView open = chromeButtonSmall("OPEN IN YOUTUBE", "Open the broadcast in YouTube",
-                view -> openInBrowser(currentUrl));
+                v -> openInBrowser(currentUrl));
         actions.addView(retry, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         LinearLayout.LayoutParams openParams = new LinearLayout.LayoutParams(
@@ -443,5 +444,8 @@ public final class LiveWeatherPanel extends FrameLayout {
 
     private int dp(float value) {
         return Math.round(value * getResources().getDisplayMetrics().density);
+    }
+}
+sources().getDisplayMetrics().density);
     }
 }

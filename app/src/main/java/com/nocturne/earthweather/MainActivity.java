@@ -307,7 +307,7 @@ public final class MainActivity extends Activity {
         liveParams.topMargin = dp(12);
         card.addView(livePanel, liveParams);
 
-        liveResumeChip = text("▶   START LIVE WEATHER BROADCAST", 10.5, COLOR_CYAN, Typeface.BOLD);
+        liveResumeChip = text("▶   START LIVE WEATHER BROADCAST", 10.5f, COLOR_CYAN, Typeface.BOLD);
         liveResumeChip.setLetterSpacing(0.08f);
         liveResumeChip.setGravity(Gravity.CENTER);
         liveResumeChip.setVisibility(View.GONE);
@@ -338,7 +338,6 @@ public final class MainActivity extends Activity {
         };
         scroll.setFillViewport(true);
         scroll.setOverScrollMode(View.OVER_SCROLL_NEVER);
-        scroll.setVerticalScrollBarVisibility(View.SCROLLBAR_NEVER);
         scroll.setBackgroundColor(Color.TRANSPARENT);
         card.setLayoutParams(new ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
@@ -1054,4 +1053,6 @@ public final class MainActivity extends Activity {
         return (slash >= 0 ? zoneId.substring(slash + 1) : zoneId).replace('_', ' ')
                 .toUpperCase(Locale.getDefault());
     }
+}
+
 }
