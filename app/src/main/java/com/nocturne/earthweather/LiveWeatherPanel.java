@@ -24,37 +24,39 @@ import android.widget.ProgressBar;
 import android.widget.TextView;
 
 /**
- * 16:9 live-broadcast panel that plays a 24/7 weather or news channel in a WebView. It degrades
- * gracefully: a tuning splash while connecting, a labelled fallback card when the stream cannot be
- * reached, and a fullscreen presentation mode.
+ * Inline 16:9 player that streams a 24/7 live broadcast (curated weather/news channel or a
+ * "live" YouTube search) inside the app. Every state is explicit: a branded loading splash,
+ * a fullscreen mode, and a graceful, labeled fallback card when the stream cannot be shown.
  */
 public final class LiveWeatherPanel extends FrameLayout {
-    private static final int COLOR_VOID = Color.rgb(2, 4, 11);
     private static final int COLOR_TEXT = Color.rgb(235, 246, 255);
     private static final int COLOR_MUTED = Color.rgb(140, 170, 196);
-    private static final int COLOR_LIVE_RED = Color.rgb(255, 84, 84);
+    private static final int COLOR_CYAN = Color.rgb(75, 212, 255);
+    private static final int COLOR_RED = Color.rgb(255, 92, 92);
+    private static final long TAP_TOLERANCE_MS = 300L;
 
     private final Activity activity;
     private final FrameLayout content;
-    private final TextView channelLabel;
-    private final TextView statusHint;
     private final View loadingView;
     private final View errorView;
-    private final TextView errorChannel;
-    private final WebView webView;
+    private final TextView channelLabel;
+    private final TextView statusHint;
+    private WebView webView;
     private Dialog fullscreenDialog;
-    private String currentUrl;
-    private String currentLabel;
     private Runnable onClose;
     private boolean errorShowing;
+    private long lastTapMillis;
 
-    public LiveWeatherPanel(Activity activity) {
-        super(activity);
-        this.activity = activity;
-        setBackgroundColor(COLOR_VOID);
+    public LiveWeatherPanel(Context context) {
+        super(context);
+        this.activity = (Activity) context;
+        setBackgroundColor(Color.BLACK);
+        setClipToOutline(true);
+        setBackground(roundRect(Color.BLACK, dp(16), dp(1), Color.argb(120, 76, 205, 249)));
+        setClickable(true);
+        setOnClickListener(this::onPlayerTap);
 
         content = new FrameLayout(activity);
-        content.setBackgroundColor(Color.BLACK);
         addView(content, new LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT));
 
@@ -63,7 +65,6 @@ public final class LiveWeatherPanel extends FrameLayout {
                 ViewGroup.LayoutParams.MATCH_PARENT));
 
         loadingView = buildLoadingView(activity);
-        loadingView.setVisibility(View.GONE);
         addView(loadingView, new LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT));
 
@@ -72,39 +73,34 @@ public final class LiveWeatherPanel extends FrameLayout {
         addView(errorView, new LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT));
 
-        addChrome(activity);
+        addChrome();
     }
 
-    private void addChrome(Activity activity) {
+    private void addChrome() {
         LinearLayout chrome = new LinearLayout(activity);
         chrome.setOrientation(LinearLayout.HORIZONTAL);
         chrome.setGravity(Gravity.CENTER_VERTICAL);
-        chrome.setPadding(dp(10), dp(8), dp(8), dp(8));
+        chrome.setPadding(dp(12), dp(8), dp(8), dp(8));
+        chrome.setBackgroundColor(Color.argb(140, 3, 8, 18));
 
-        TextView badge = new TextView(activity);
-        badge.setText("● LIVE");
-        badge.setTextSize(9.5f);
-        badge.setTextColor(Color.WHITE);
-        badge.setTypeface(Typeface.create("sans-serif", Typeface.BOLD));
-        badge.setLetterSpacing(0.12f);
-        badge.setPadding(dp(10), dp(5), dp(10), dp(5));
-        GradientDrawable badgeBg = new GradientDrawable();
-        badgeBg.setColor(Color.argb(232, 178, 34, 34));
-        badgeBg.setCornerRadius(dp(12));
-        badge.setBackground(badgeBg);
-        chrome.addView(badge);
+        TextView live = new TextView(activity);
+        live.setText("●  LIVE");
+        live.setTextSize(10);
+        live.setTextColor(COLOR_RED);
+        live.setTypeface(Typeface.create("sans-serif", Typeface.BOLD));
+        live.setLetterSpacing(0.12f);
+        chrome.addView(live, new LinearLayout.LayoutParams(0,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
         channelLabel = new TextView(activity);
         channelLabel.setTextColor(COLOR_TEXT);
-        channelLabel.setTextSize(9.5f);
+        channelLabel.setTextSize(9f);
         channelLabel.setTypeface(Typeface.create("sans-serif", Typeface.BOLD));
-        channelLabel.setLetterSpacing(0.08f);
+        channelLabel.setLetterSpacing(0.06f);
         channelLabel.setSingleLine(true);
         channelLabel.setEllipsize(android.text.TextUtils.TruncateAt.END);
-        LinearLayout.LayoutParams labelParams = new LinearLayout.LayoutParams(0,
-                ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
-        labelParams.leftMargin = dp(10);
-        chrome.addView(channelLabel, labelParams);
+        chrome.addView(channelLabel, new LinearLayout.LayoutParams(0,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 2f));
 
         chrome.addView(chromeButton("⛶", "Make the broadcast fullscreen",
                 view -> showFullscreen()));
@@ -113,7 +109,7 @@ public final class LiveWeatherPanel extends FrameLayout {
                     if (onClose != null) onClose.run();
                 }));
 
-        FrameLayout.LayoutParams chromeParams = new LayoutParams(
+        LinearLayout.LayoutParams chromeParams = new LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
                 Gravity.TOP);
         addView(chrome, chromeParams);
@@ -125,10 +121,10 @@ public final class LiveWeatherPanel extends FrameLayout {
         statusHint.setTypeface(Typeface.create("sans-serif", Typeface.BOLD));
         statusHint.setLetterSpacing(0.10f);
         statusHint.setGravity(Gravity.CENTER_HORIZONTAL);
-        FrameLayout.LayoutParams hintParams = new LayoutParams(
+        statusHint.setVisibility(View.GONE);
+        LinearLayout.LayoutParams hintParams = new LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
                 Gravity.BOTTOM);
-        hintParams.bottomMargin = dp(2);
         addView(statusHint, hintParams);
     }
 
@@ -152,18 +148,35 @@ public final class LiveWeatherPanel extends FrameLayout {
         view.setOrientation(LinearLayout.VERTICAL);
         view.setGravity(Gravity.CENTER);
         view.setBackgroundColor(Color.BLACK);
+        view.setPadding(dp(18), dp(14), dp(18), dp(14));
+
         ProgressBar spinner = new ProgressBar(activity);
-        view.addView(spinner, new LinearLayout.LayoutParams(dp(30), dp(30)));
+        LinearLayout.LayoutParams spinnerParams = new LinearLayout.LayoutParams(dp(30), dp(30));
+        view.addView(spinner, spinnerParams);
+
         TextView label = new TextView(activity);
         label.setText("TUNING INTO LIVE BROADCAST…");
-        label.setTextSize(10f);
-        label.setTextColor(COLOR_MUTED);
+        label.setTextSize(10.5f);
+        label.setTextColor(COLOR_CYAN);
         label.setTypeface(Typeface.create("sans-serif", Typeface.BOLD));
-        label.setLetterSpacing(0.10f);
+        label.setLetterSpacing(0.12f);
+        label.setGravity(Gravity.CENTER);
         LinearLayout.LayoutParams labelParams = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        labelParams.topMargin = dp(12);
+        labelParams.topMargin = dp(10);
         view.addView(label, labelParams);
+
+        TextView hint = new TextView(activity);
+        hint.setText("24/7 WEATHER CHANNEL · NO ADS, NO SIGN-INS");
+        hint.setTextSize(8f);
+        hint.setTextColor(Color.argb(170, 140, 170, 196));
+        hint.setTypeface(Typeface.create("sans-serif", Typeface.BOLD));
+        hint.setLetterSpacing(0.10f);
+        hint.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams hintParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        hintParams.topMargin = dp(5);
+        view.addView(hint, hintParams);
         return view;
     }
 
@@ -171,72 +184,87 @@ public final class LiveWeatherPanel extends FrameLayout {
         LinearLayout view = new LinearLayout(activity);
         view.setOrientation(LinearLayout.VERTICAL);
         view.setGravity(Gravity.CENTER);
-        view.setPadding(dp(18), dp(14), dp(18), dp(14));
         view.setBackgroundColor(Color.BLACK);
+        view.setPadding(dp(18), dp(12), dp(18), dp(12));
 
-        TextView icon = new TextView(activity);
-        icon.setText("📡");
-        icon.setTextSize(26f);
-        view.addView(icon);
+        TextView glyph = new TextView(activity);
+        glyph.setText("⚠");
+        glyph.setTextSize(18);
+        glyph.setTextColor(Color.rgb(255, 173, 75));
+        glyph.setGravity(Gravity.CENTER);
+        view.addView(glyph, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         TextView title = new TextView(activity);
-        title.setText("BROADCAST NOT REACHABLE RIGHT NOW");
+        title.setText("THIS STREAM IS UNAVAILABLE RIGHT NOW");
+        title.setTextSize(10.5f);
         title.setTextColor(COLOR_TEXT);
-        title.setTextSize(11.5f);
         title.setTypeface(Typeface.create("sans-serif", Typeface.BOLD));
-        title.setLetterSpacing(0.06f);
+        title.setLetterSpacing(0.08f);
         title.setGravity(Gravity.CENTER);
         LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        titleParams.topMargin = dp(10);
+        titleParams.topMargin = dp(8);
         view.addView(title, titleParams);
 
-        errorChannel = new TextView(activity);
-        errorChannel.setTextColor(COLOR_MUTED);
-        errorChannel.setTextSize(9.5f);
-        errorChannel.setGravity(Gravity.CENTER);
-        errorChannel.setLineSpacing(dp(2), 1f);
-        LinearLayout.LayoutParams channelParams = new LinearLayout.LayoutParams(
+        TextView detail = new TextView(activity);
+        detail.setText("Some 24/7 channels pause or block in-app playback. You can retry, or open the broadcast in YouTube.");
+        detail.setTextSize(8.5f);
+        detail.setTextColor(COLOR_MUTED);
+        detail.setLineSpacing(dp(2), 1f);
+        detail.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams detailParams = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        channelParams.topMargin = dp(6);
-        view.addView(errorChannel, channelParams);
+        detailParams.topMargin = dp(5);
+        view.addView(detail, detailParams);
 
-        LinearLayout buttons = new LinearLayout(activity);
-        buttons.setOrientation(LinearLayout.HORIZONTAL);
-        buttons.setGravity(Gravity.CENTER);
-        buttons.addView(fallbackButton("RETRY", this::retry));
-        buttons.addView(fallbackButton("OPEN IN YOUTUBE", this::openInYouTube));
-        LinearLayout.LayoutParams buttonsParams = new LinearLayout.LayoutParams(
+        LinearLayout actions = new LinearLayout(activity);
+        actions.setOrientation(LinearLayout.HORIZONTAL);
+        actions.setGravity(Gravity.CENTER);
+        TextView retry = chromeButtonSmall("RETRY", "Retry the broadcast",
+                view -> {
+                    errorShowing = false;
+                    errorView.setVisibility(View.GONE);
+                    if (webView != null) webView.reload();
+                    loadingView.setVisibility(View.VISIBLE);
+                });
+        TextView open = chromeButtonSmall("OPEN IN YOUTUBE", "Open the broadcast in YouTube",
+                view -> openInBrowser(currentUrl));
+        actions.addView(retry, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        LinearLayout.LayoutParams openParams = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        buttonsParams.topMargin = dp(13);
-        view.addView(buttons, buttonsParams);
+        openParams.leftMargin = dp(8);
+        actions.addView(open, openParams);
+        LinearLayout.LayoutParams actionsParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                Gravity.CENTER_HORIZONTAL);
+        actionsParams.topMargin = dp(9);
+        view.addView(actions, actionsParams);
         return view;
     }
 
-    private TextView fallbackButton(String label, OnClickListener listener) {
+    private TextView chromeButtonSmall(String label, String description, OnClickListener listener) {
         TextView button = new TextView(activity);
         button.setText(label);
-        button.setTextSize(9.5f);
-        button.setTextColor(Color.WHITE);
+        button.setTextSize(8.5f);
+        button.setTextColor(COLOR_CYAN);
         button.setTypeface(Typeface.create("sans-serif", Typeface.BOLD));
         button.setLetterSpacing(0.08f);
         button.setGravity(Gravity.CENTER);
-        button.setPadding(dp(13), dp(9), dp(13), dp(9));
-        button.setContentDescription(label);
+        button.setPadding(dp(12), dp(8), dp(12), dp(8));
+        button.setContentDescription(description);
         button.setOnClickListener(listener);
-        GradientDrawable bg = new GradientDrawable();
-        bg.setColor(Color.argb(225, 16, 44, 70));
-        bg.setCornerRadius(dp(14));
-        bg.setStroke(dp(1), Color.argb(120, 84, 210, 255));
-        button.setBackground(bg);
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        if (label.equals("OPEN IN YOUTUBE")) params.leftMargin = dp(8);
-        button.setLayoutParams(params);
+        button.setBackground(roundRect(Color.argb(175, 17, 49, 76), dp(14),
+                dp(1), Color.argb(105, 84, 210, 255)));
         return button;
     }
 
     private WebView buildWebView() {
+        return buildWebView(false);
+    }
+
+    private WebView buildWebView(final boolean standalone) {
         WebView view = new WebView(activity);
         WebSettings settings = view.getSettings();
         settings.setJavaScriptEnabled(true);
@@ -248,7 +276,7 @@ public final class LiveWeatherPanel extends FrameLayout {
         view.setWebViewClient(new WebViewClient() {
             @Override
             public void onPageFinished(WebView view, String url) {
-                if (!errorShowing) loadingView.setVisibility(View.GONE);
+                if (!standalone && !errorShowing) loadingView.setVisibility(View.GONE);
             }
 
             @Override
@@ -258,115 +286,55 @@ public final class LiveWeatherPanel extends FrameLayout {
                 if (uri == null || !uri.isHierarchical()) return;
                 String scheme = uri.getScheme();
                 if (scheme == null || (!scheme.equals("http") && !scheme.equals("https"))) return;
-                showError();
+                if (standalone) {
+                    closeFullscreen();
+                } else {
+                    showError();
+                }
             }
 
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 Uri uri = request.getUrl();
-                String host = uri == null ? null : uri.getHost();
-                if (host != null && (host.equals("youtube.com")
-                        || host.endsWith(".youtube.com") || host.equals("youtu.be"))) {
-                    return false;
-                }
+                if (uri == null) return true;
+                if (uri.getHost() == null) return true;
+                String host = uri.getHost().toLowerCase(java.util.Locale.ROOT);
+                if (host.equals("youtube.com") || host.equals("youtu.be")) return false;
                 try {
-                    activity.startActivity(new Intent(Intent.ACTION_VIEW, uri));
-                } catch (Exception ignored) {
-                    // No browser available; keep the current page.
-                }
+                    activity.startActivity(new Intent(Intent.ACTION_VIEW, uri)
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+                } catch (Exception ignored) { }
                 return true;
             }
         });
         return view;
     }
 
-    /** Starts (or restarts) a broadcast. @param label is the human channel name shown in chrome. */
-    public void load(String url, String label) {
-        currentUrl = url;
-        currentLabel = label;
-        channelLabel.setText(label);
-        errorShowing = false;
-        errorView.setVisibility(View.GONE);
-        loadingView.setVisibility(View.VISIBLE);
-        if (webView.getVisibility() != View.VISIBLE) webView.setVisibility(View.VISIBLE);
-        try {
-            webView.loadUrl(url);
-        } catch (Exception error) {
-            showError();
-        }
-    }
-
-    private void retry() {
-        if (currentUrl != null) load(currentUrl, currentLabel);
-    }
-
-    private void openInYouTube() {
-        try {
-            activity.startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(currentUrl)));
-        } catch (Exception ignored) {
-        }
-    }
-
     private void showError() {
         if (errorShowing) return;
         errorShowing = true;
         loadingView.setVisibility(View.GONE);
-        errorChannel.setText(currentLabel == null ? "LIVE BROADCAST" : currentLabel
-                + "\nThe channel may not be airing right now, or this device could not reach it.");
         errorView.setVisibility(View.VISIBLE);
     }
 
-    public void showFullscreen() {
-        if (currentUrl == null || fullscreenDialog != null) return;
-        showFullscreenDialog(currentUrl);
+    /** Starts (or switches to) the broadcast for the given source. */
+    public void load(String url, String channel) {
+        currentUrl = url;
+        channelLabel.setText(channel);
+        errorShowing = false;
+        errorView.setVisibility(View.GONE);
+        loadingView.setVisibility(View.VISIBLE);
+        statusHint.setVisibility(View.GONE);
+        if (webView != null) webView.loadUrl(url);
+        loadingView.postDelayed(() -> {
+            if (loadingView.getVisibility() == View.VISIBLE) {
+                statusHint.setVisibility(View.VISIBLE);
+            }
+        }, 12_000L);
     }
 
-    private void showFullscreenDialog(String url) {
-        fullscreenDialog = new Dialog(activity);
-        fullscreenDialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
-        fullscreenDialog.setCanceledOnTouchOutside(false);
-
-        FrameLayout root = new FrameLayout(activity);
-        root.setBackgroundColor(Color.BLACK);
-
-        WebView player = buildWebView(true);
-        root.addView(player, new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-
-        TextView close = new TextView(activity);
-        close.setText("×");
-        close.setTextSize(22f);
-        close.setTextColor(Color.WHITE);
-        close.setGravity(Gravity.CENTER);
-        close.setContentDescription("Exit fullscreen");
-        GradientDrawable closeBg = new GradientDrawable();
-        closeBg.setColor(Color.argb(150, 4, 10, 22));
-        closeBg.setCornerRadius(dp(18));
-        close.setBackground(closeBg);
-        FrameLayout.LayoutParams closeParams = new FrameLayout.LayoutParams(dp(46), dp(46),
-                Gravity.TOP | Gravity.START);
-        closeParams.leftMargin = dp(14);
-        closeParams.topMargin = dp(26);
-        root.addView(close, closeParams);
-
-        fullscreenDialog.setContentView(root);
-        Window window = fullscreenDialog.getWindow();
-        if (window != null) {
-            window.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
-            window.setBackgroundDrawable(new ColorDrawable(Color.BLACK));
-            window.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
-            window.getDecorView().setSystemUiVisibility(
-                    View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
-                            | View.SYSTEM_UI_FLAG_FULLSCREEN
-                            | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
-                            | View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-                            | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
-                            | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION);
-        }
-        fullscreenDialog.setOnDismissListener(dialog -> player.destroy());
-        close.setOnClickListener(v -> fullscreenDialog.dismiss());
-        fullscreenDialog.show();
-        player.loadUrl(url);
+    public void setOnClose(Runnable runnable) {
+        this.onClose = runnable;
     }
 
     public boolean isFullscreenOpen() {
@@ -374,22 +342,103 @@ public final class LiveWeatherPanel extends FrameLayout {
     }
 
     public void closeFullscreen() {
-        if (isFullscreenOpen()) fullscreenDialog.dismiss();
+        if (fullscreenDialog != null && fullscreenDialog.isShowing()) fullscreenDialog.dismiss();
     }
 
-    public void setOnClose(Runnable onClose) {
-        this.onClose = onClose;
+    private void showFullscreen() {
+        if (currentUrl.isEmpty()) return;
+        if (fullscreenDialog != null && fullscreenDialog.isShowing()) {
+            fullscreenDialog.dismiss();
+            return;
+        }
+        fullscreenDialog = new Dialog(activity);
+        fullscreenDialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+        fullscreenDialog.setContentView(buildFullscreenContent());
+        Window window = fullscreenDialog.getWindow();
+        if (window != null) {
+            window.setBackgroundDrawable(new ColorDrawable(Color.BLACK));
+            window.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
+            window.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
+        }
+        fullscreenDialog.setOnDismissListener(dialog -> fullscreenDialog = null);
+        fullscreenDialog.show();
     }
 
-    /** Releases the embedded browser. Call from the owning activity's onDestroy. */
-    public void destroy() {
-        closeFullscreen();
+    private View buildFullscreenContent() {
+        FrameLayout root = new FrameLayout(activity);
+        root.setBackgroundColor(Color.BLACK);
+
+        WebView player = buildWebView(true);
+        root.addView(player, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        player.loadUrl(currentUrl);
+
+
+        TextView close = new TextView(activity);
+        close.setText("×");
+        close.setTextSize(26);
+        close.setTextColor(COLOR_TEXT);
+        close.setGravity(Gravity.CENTER);
+        close.setContentDescription("Exit fullscreen");
+        close.setBackground(roundRect(Color.argb(175, 10, 24, 47), dp(22),
+                dp(1), Color.argb(110, 90, 207, 255)));
+        close.setOnClickListener(view -> {
+            if (fullscreenDialog != null) fullscreenDialog.dismiss();
+        });
+        FrameLayout.LayoutParams closeParams = new FrameLayout.LayoutParams(dp(46), dp(46),
+                Gravity.TOP | Gravity.END);
+        closeParams.setMargins(0, dp(18), dp(16), 0);
+        root.addView(close, closeParams);
+
+        TextView label = new TextView(activity);
+        label.setText("LIVE WEATHER BROADCAST · FULLSCREEN");
+        label.setTextSize(8.5f);
+        label.setTextColor(Color.argb(200, 140, 170, 196));
+        label.setTypeface(Typeface.create("sans-serif", Typeface.BOLD));
+        label.setLetterSpacing(0.12f);
+        label.setGravity(Gravity.CENTER_HORIZONTAL);
+        FrameLayout.LayoutParams labelParams = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                Gravity.BOTTOM);
+        labelParams.bottomMargin = dp(16);
+        root.addView(label, labelParams);
+        return root;
+    }
+
+    private void onPlayerTap() {
+        long now = System.currentTimeMillis();
+        if (now - lastTapMillis < TAP_TOLERANCE_MS) {
+            showFullscreen();
+            lastTapMillis = 0L;
+        } else {
+            lastTapMillis = now;
+        }
+    }
+
+    private void openInBrowser(String url) {
         try {
-            webView.loadUrl("about:blank");
-            content.removeView(webView);
-            webView.destroy();
+            activity.startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
         } catch (Exception ignored) {
         }
+    }
+
+    /** Releases the WebView when the activity is finished. */
+    public void destroy() {
+        if (fullscreenDialog != null && fullscreenDialog.isShowing()) fullscreenDialog.dismiss();
+        if (webView != null) {
+            content.removeView(webView);
+            webView.destroy();
+            webView = null;
+        }
+    }
+
+    private GradientDrawable roundRect(int color, int radius, int strokeWidth, int strokeColor) {
+        GradientDrawable drawable = new GradientDrawable();
+        drawable.setColor(color);
+        drawable.setCornerRadius(radius);
+        if (strokeWidth > 0) drawable.setStroke(strowCount, strokeColor);
+        return drawable;
     }
 
     private int dp(float value) {

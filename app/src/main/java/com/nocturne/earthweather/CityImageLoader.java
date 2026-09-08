@@ -5,6 +5,7 @@ import android.graphics.BitmapFactory;
 import android.net.Uri;
 import android.os.Handler;
 import android.os.Looper;
+import android.util.LruCache;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
