@@ -109,9 +109,9 @@ public final class GlobeRenderer implements android.opengl.GLSurfaceView.Rendere
             GLES20.glGetIntegerv(GLES20.GL_MAX_TEXTURE_SIZE, maxTextureSize, 0);
             // Target long edges keep decoded bitmaps comfortably small (a few MB each) so the
             // init never blows the process memory budget, whatever the source resolution.
-            earthTexture = loadTexture(R.drawable.earth_night, 2048, new int[]{0xFF02050E});
-            dayTexture = loadTexture(R.drawable.earth_day, 1536, new int[]{0xFF143054});
-            cloudTexture = loadTexture(R.drawable.earth_clouds, 1536, new int[]{0xFF000000});
+            earthTexture = loadTexture(R.drawable.earth_night, 2048, 0xFF02050E);
+            dayTexture = loadTexture(R.drawable.earth_day, 1536, 0xFF143054);
+            cloudTexture = loadTexture(R.drawable.earth_clouds, 1536, 0xFF000000);
             cityBufferDirty = true;
             previousFrameNanos = 0L;
         } catch (Throwable error) {
