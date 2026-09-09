@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -36,6 +36,20 @@ jobs:
 
       - name: Build debug APK, unsigned release APK, and unsigned App Bundle
         run: ./gradlew --no-daemon --stacktrace assembleDebug assembleRelease bundleRelease
+
+      - name: Stage deliverables on a temporary branch (sandbox transport)
+        run: |
+          set -euo pipefail
+          mkdir -p deliverables
+          cp app/build/outputs/apk/debug/app-debug.apk deliverables/NocturneEarth-debug.apk
+          cp app/build/outputs/apk/release/app-release-unsigned.apk deliverables/NocturneEarth-release-unsigned.apk
+          cp app/build/outputs/bundle/release/app-release.aab deliverables/NocturneEarth-release-unsigned.aab
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -B ci-artifacts
+          git add -f deliverables
+          git commit -m "ci: stage build deliverables (temporary transport branch)"
+          git push -f origin ci-artifacts
 
       - name: Upload Android deliverables
         uses: actions/upload-artifact@v4
