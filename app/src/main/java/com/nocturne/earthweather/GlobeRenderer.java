@@ -7,6 +7,7 @@ import android.opengl.GLES20;
 import android.opengl.GLUtils;
 import android.opengl.Matrix;
 import android.os.SystemClock;
+import android.util.Log;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -60,6 +61,7 @@ public final class GlobeRenderer implements android.opengl.GLSurfaceView.Rendere
 
     private volatile float aspect = 1f;
     private long previousFrameNanos;
+    private volatile boolean rendererFatal;
 
     // All angles are radians. Initial framing presents the whole disc with comfortable
     // breathing room (deliberately 50% further back than a tight crop), then slowly drifts.
@@ -92,26 +94,31 @@ public final class GlobeRenderer implements android.opengl.GLSurfaceView.Rendere
 
     @Override
     public void onSurfaceCreated(GL10 unused, EGLConfig config) {
-        GLES20.glClearColor(0.001f, 0.003f, 0.012f, 1f);
-        GLES20.glDisable(GLES20.GL_DITHER);
-        GLES20.glEnable(GLES20.GL_DEPTH_TEST);
-        GLES20.glDepthFunc(GLES20.GL_LEQUAL);
+        try {
+            GLES20.glClearColor(0.001f, 0.003f, 0.012f, 1f);
+            GLES20.glDisable(GLES20.GL_DITHER);
+            GLES20.glEnable(GLES20.GL_DEPTH_TEST);
+            GLES20.glDepthFunc(GLES20.GL_LEQUAL);
 
-        earthProgram = createProgram(EARTH_VERTEX_SHADER, EARTH_FRAGMENT_SHADER);
-        atmosphereProgram = createProgram(ATMOSPHERE_VERTEX_SHADER, ATMOSPHERE_FRAGMENT_SHADER);
-        cityProgram = createProgram(CITY_VERTEX_SHADER, CITY_FRAGMENT_SHADER);
-        starProgram = createProgram(STAR_VERTEX_SHADER, STAR_FRAGMENT_SHADER);
+            earthProgram = createProgram(EARTH_VERTEX_SHADER, EARTH_FRAGMENT_SHADER);
+            atmosphereProgram = createProgram(ATMOSPHERE_VERTEX_SHADER, ATMOSPHERE_FRAGMENT_SHADER);
+            cityProgram = createProgram(CITY_VERTEX_SHADER, CITY_FRAGMENT_SHADER);
+            starProgram = createProgram(STAR_VERTEX_SHADER, STAR_FRAGMENT_SHADER);
 
-        int[] maxTextureSize = new int[1];
-        GLES20.glGetIntegerv(GLES20.GL_MAX_TEXTURE_SIZE, maxTextureSize, 0);
-        earthTexture = loadTexture(R.drawable.earth_night, maxTextureSize[0] >= 4096 ? 1 : 2,
-                Bitmap.Config.ARGB_8888);
-        dayTexture = loadTexture(R.drawable.earth_day, maxTextureSize[0] >= 2048 ? 1 : 2,
-                Bitmap.Config.ARGB_8888);
-        cloudTexture = loadTexture(R.drawable.earth_clouds, maxTextureSize[0] >= 2048 ? 1 : 2,
-                Bitmap.Config.RGB_565);
-        cityBufferDirty = true;
-        previousFrameNanos = 0L;
+            int[] maxTextureSize = new int[1];
+            GLES20.glGetIntegerv(GLES20.GL_MAX_TEXTURE_SIZE, maxTextureSize, 0);
+            // Target long edges keep decoded bitmaps comfortably small (a few MB each) so the
+            // init never blows the process memory budget, whatever the source resolution.
+            earthTexture = loadTexture(R.drawable.earth_night, 2048, new int[]{0xFF02050E});
+            dayTexture = loadTexture(R.drawable.earth_day, 1536, new int[]{0xFF143054});
+            cloudTexture = loadTexture(R.drawable.earth_clouds, 1536, new int[]{0xFF000000});
+            cityBufferDirty = true;
+            previousFrameNanos = 0L;
+        } catch (Throwable error) {
+            // A broken GPU context must not take the whole app down; the HUD stays usable.
+            Log.e("GlobeRenderer", "OpenGL initialisation failed", error);
+            rendererFatal = true;
+        }
     }
 
     @Override
@@ -123,21 +130,31 @@ public final class GlobeRenderer implements android.opengl.GLSurfaceView.Rendere
 
     @Override
     public void onDrawFrame(GL10 unused) {
-        long nowNanos = System.nanoTime();
-        float deltaSeconds = previousFrameNanos == 0L ? 0.016f
-                : Math.min(0.05f, (nowNanos - previousFrameNanos) / 1_000_000_000f);
-        previousFrameNanos = nowNanos;
+        if (rendererFatal) {
+            GLES20.glClearColor(0.001f, 0.003f, 0.012f, 1f);
+            GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT | GLES20.GL_DEPTH_BUFFER_BIT);
+            return;
+        }
+        try {
+            long nowNanos = System.nanoTime();
+            float deltaSeconds = previousFrameNanos == 0L ? 0.016f
+                    : Math.min(0.05f, (nowNanos - previousFrameNanos) / 1_000_000_000f);
+            previousFrameNanos = nowNanos;
 
-        Transform transform = advanceAndSnapshot(deltaSeconds);
-        buildMatrices(transform);
-        if (cityBufferDirty) rebuildCityBuffer();
+            Transform transform = advanceAndSnapshot(deltaSeconds);
+            buildMatrices(transform);
+            if (cityBufferDirty) rebuildCityBuffer();
 
-        GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT | GLES20.GL_DEPTH_BUFFER_BIT);
-        float elapsed = SystemClock.elapsedRealtime() / 1000f;
-        drawStars(elapsed);
-        drawEarth(transform, elapsed);
-        drawAtmosphere(transform);
-        if (markersVisible) drawCities(transform, elapsed);
+            GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT | GLES20.GL_DEPTH_BUFFER_BIT);
+            float elapsed = SystemClock.elapsedRealtime() / 1000f;
+            drawStars(elapsed);
+            drawEarth(transform, elapsed);
+            drawAtmosphere(transform);
+            if (markersVisible) drawCities(transform, elapsed);
+        } catch (Throwable error) {
+            Log.e("GlobeRenderer", "Frame rendering failed", error);
+            rendererFatal = true;
+        }
     }
 
     private Transform advanceAndSnapshot(float deltaSeconds) {
@@ -429,13 +446,39 @@ public final class GlobeRenderer implements android.opengl.GLSurfaceView.Rendere
         cityVertices.position(0);
     }
 
-    private int loadTexture(int resourceId, int sampleSize, Bitmap.Config bitmapConfig) {
-        BitmapFactory.Options options = new BitmapFactory.Options();
-        options.inScaled = false;
-        options.inPreferredConfig = bitmapConfig;
-        options.inSampleSize = sampleSize;
-        Bitmap bitmap = BitmapFactory.decodeResource(context.getResources(), resourceId, options);
-        if (bitmap == null) throw new IllegalStateException("Could not load globe texture");
+    /**
+     * Decodes a texture resource at a resolution that fits the device memory budget. Never throws:
+     * if decoding is impossible (corrupt asset, OOM on a weak device) a tiny solid colour is used
+     * instead, so the app always opens.
+     */
+    private int loadTexture(int resourceId, int targetLongEdge, int fallbackColor) {
+        Bitmap bitmap = null;
+        try {
+            BitmapFactory.Options probe = new BitmapFactory.Options();
+            probe.inJustDecodeBounds = true;
+            probe.inScaled = false;
+            BitmapFactory.decodeResource(context.getResources(), resourceId, probe);
+            int sourceWidth = probe.outWidth;
+            int sourceHeight = probe.outHeight;
+            if (sourceWidth > 0 && sourceHeight > 0) {
+                int sample = 1;
+                int longEdge = Math.max(sourceWidth, sourceHeight);
+                while (longEdge / sample > targetLongEdge) sample *= 2;
+                BitmapFactory.Options decode = new BitmapFactory.Options();
+                decode.inSampleSize = sample;
+                decode.inScaled = false;
+                decode.inPreferredConfig = Bitmap.Config.ARGB_8888;
+                bitmap = BitmapFactory.decodeResource(context.getResources(), resourceId, decode);
+            }
+        } catch (Throwable ignored) {
+            bitmap = null;
+        }
+        if (bitmap == null) {
+            int[] pixels = new int[16];
+            for (int i = 0; i < pixels.length; i++) pixels[i] = fallbackColor;
+            bitmap = Bitmap.createBitmap(pixels, 4, 4, Bitmap.Config.ARGB_8888);
+            Log.w("GlobeRenderer", "Texture " + resourceId + " fell back to a solid colour");
+        }
         int[] textures = new int[1];
         GLES20.glGenTextures(1, textures, 0);
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textures[0]);

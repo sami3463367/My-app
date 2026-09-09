@@ -17,6 +17,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.util.Log;
 import android.text.Editable;
 import android.text.InputType;
 import android.text.TextWatcher;
@@ -299,13 +300,21 @@ public final class MainActivity extends Activity {
         card.addView(metricsLine, metricsParams);
 
         // ── Live broadcast section ─────────────────────────────────────────────
-        livePanel = new LiveWeatherPanel(this);
-        livePanel.setVisibility(View.GONE);
-        livePanel.setOnClose(this::collapseLiveBroadcast);
-        LinearLayout.LayoutParams liveParams = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dp(150));
-        liveParams.topMargin = dp(12);
-        card.addView(livePanel, liveParams);
+        // A broken WebView provider must not prevent the app from opening.
+        try {
+            livePanel = new LiveWeatherPanel(this);
+        } catch (Throwable error) {
+            Log.e("MainActivity", "Live broadcast panel unavailable", error);
+            livePanel = null;
+        }
+        if (livePanel != null) {
+            livePanel.setVisibility(View.GONE);
+            livePanel.setOnClose(this::collapseLiveBroadcast);
+            LinearLayout.LayoutParams liveParams = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, dp(150));
+            liveParams.topMargin = dp(12);
+            card.addView(livePanel, liveParams);
+        }
 
         liveResumeChip = text("▶   START LIVE WEATHER BROADCAST", 10.5f, COLOR_CYAN, Typeface.BOLD);
         liveResumeChip.setLetterSpacing(0.08f);
@@ -458,7 +467,8 @@ public final class MainActivity extends Activity {
         drawer.addView(toolSwitch("LIVE BROADCAST", "Auto-start a 24/7 live weather channel when a city opens",
                 liveBroadcastEnabled, (button, enabled) -> {
                     liveBroadcastEnabled = enabled;
-                    if (enabled && activeCity != null && livePanel.getVisibility() != View.VISIBLE) {
+                    if (enabled && activeCity != null && livePanel != null
+                            && livePanel.getVisibility() != View.VISIBLE) {
                         expandLiveBroadcast();
                     } else if (!enabled) {
                         collapseLiveBroadcast();
@@ -604,26 +614,27 @@ public final class MainActivity extends Activity {
         updateCityPhoto(city);
         if (liveBroadcastEnabled) {
             expandLiveBroadcast();
-        } else {
+        } else if (livePanel != null) {
             livePanel.setVisibility(View.GONE);
             liveResumeChip.setVisibility(View.VISIBLE);
         }
     }
 
     private void expandLiveBroadcast() {
-        if (activeCity == null) return;
+        if (activeCity == null || livePanel == null) return;
         liveResumeChip.setVisibility(View.GONE);
         livePanel.setVisibility(View.VISIBLE);
         startLiveBroadcast();
     }
 
     private void collapseLiveBroadcast() {
+        if (livePanel == null) return;
         livePanel.setVisibility(View.GONE);
         if (activeCity != null) liveResumeChip.setVisibility(View.VISIBLE);
     }
 
     private void startLiveBroadcast() {
-        if (activeCity == null) return;
+        if (activeCity == null || livePanel == null) return;
         LiveWeatherCatalog.Entry entry = LiveWeatherCatalog.entryFor(activeCity.country);
         if (entry != null) {
             livePanel.load(entry.liveUrl, entry.channelLabel);
